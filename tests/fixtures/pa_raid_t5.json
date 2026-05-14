@@ -1,0 +1,12 @@
+{
+  "type": "raid",
+  "gym_id": "gym-pa",
+  "gym_name": "PA Test Gym",
+  "latitude": 1.3521,
+  "longitude": 103.8198,
+  "raid_level": 5,
+  "pokemon_id": 384,
+  "form": 0,
+  "raid_begin": 1747232400,
+  "raid_end": 1747235100
+}

@@ -1,0 +1,9 @@
+{
+  "type": "monster",
+  "message": {
+    "encounter_id": "x",
+    "pokemon_id": 246,
+    "longitude": 103.8198,
+    "disappear_time": 1747234500
+  }
+}
