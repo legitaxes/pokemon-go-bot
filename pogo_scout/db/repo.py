@@ -85,6 +85,14 @@ def mark_seen(conn, event_id: str, *, kind: str, now: datetime) -> None:
 
 # ---------- events_active ----------
 
+def get_active_event_iv(conn, event_id: str) -> float | None:
+    """Get the previously stored IV for an event_id, or None if not found."""
+    row = conn.execute(
+        "SELECT iv_percent FROM events_active WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
 def insert_active(conn, event: Event) -> None:
     if isinstance(event, MonsterEvent):
         params = (

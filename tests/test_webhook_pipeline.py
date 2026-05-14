@@ -17,7 +17,7 @@ def _make_config(db):
     cfg = SimpleNamespace(
         home_lat=1.3521, home_lng=103.8198,
         radius_m=2000,
-        iv_floor=90.0, raid_tier_floor=5, gl_rank_floor=0, ul_rank_floor=0,
+        iv_floor=90.0, raid_tier_floor=5, gl_rank_floor=5, ul_rank_floor=5,
         shiny_alert=True, mute_until=None,
         wanted_species=[], raid_boss_allowlist=set(),
         allowed_chat_ids=[123],
@@ -48,7 +48,8 @@ async def test_pipeline_iv_match_dispatches(db, fixtures_dir):
 @pytest.mark.asyncio
 async def test_pipeline_no_match_no_dispatch_but_persists(db, fixtures_dir):
     cfg = _make_config(db)
-    cfg.iv_floor = 99.0
+    cfg.iv_floor = 99.0  # the fixture is 98% so it won't match
+    cfg.gl_rank_floor = 1  # block the fixture's rank-3 PvP from triggering a match
     notifier = AsyncMock()
     notifier.broadcast = AsyncMock()
     pipeline = WebhookPipeline(
@@ -95,7 +96,8 @@ async def test_pipeline_dedupe_skips_repeat(db, fixtures_dir):
 @pytest.mark.asyncio
 async def test_pipeline_audit_records_no_match(db, fixtures_dir):
     cfg = _make_config(db)
-    cfg.iv_floor = 99.0
+    cfg.iv_floor = 99.0  # the fixture is 98% so it won't match
+    cfg.gl_rank_floor = 1  # block the fixture's rank-3 PvP from triggering a match
     notifier = AsyncMock()
     notifier.broadcast = AsyncMock()
     pipeline = WebhookPipeline(

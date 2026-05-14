@@ -33,7 +33,10 @@ class WebhookPipeline:
 
         ttl = _DEDUPE_TTL_MONSTER if isinstance(event, MonsterEvent) else _DEDUPE_TTL_RAID
         if repo.seen_recently(self.conn, event.event_id, ttl_seconds=ttl, now=now):
-            return
+            # Exception: re-process a MonsterEvent that now has IV (previously seen without IV).
+            if not (isinstance(event, MonsterEvent) and event.iv_percent is not None and
+                    repo.get_active_event_iv(self.conn, event.event_id) is None):
+                return
 
         center = proximity_center(self.config, now)
         if not within_radius(center, (event.lat, event.lng), self.config.radius_m):
