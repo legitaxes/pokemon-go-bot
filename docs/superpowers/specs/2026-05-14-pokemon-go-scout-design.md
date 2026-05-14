@@ -11,8 +11,8 @@
 Build a personal Pokémon Go scout bot that:
 
 - Receives spawn and raid events for the Singapore region via webhook (Poracle / PokéAlarm protocol) from a community scanner.
-- Filters events down to those the user cares about (within a fixed home radius, matching wanted species / IV floor / raid tier / PvP rank).
-- Pushes matching alerts to the user via a Telegram bot.
+- Filters events down to those the user cares about (within a configurable proximity radius around either the user's home or their current shared live location, matching wanted species / IV floor / raid tier / PvP rank).
+- Pushes matching alerts to the user via a Telegram bot, each alert including a static map image with the spawn location marked.
 - Also supports a "scout mode": on-demand `/nearby` queries and a periodic digest that show **all** in-radius activity, ignoring the push-alert filters.
 - Allows live config edits (wanted list, radius, mute, etc.) from Telegram without restarting.
 - Runs unattended 24/7 on a Pi with graceful failure handling and silence detection.
@@ -61,13 +61,15 @@ pokemon-go-bot/
 │   │   ├── pvp.py
 │   │   └── decide.py        # should_push_alert(event, config) -> (bool, reason)
 │   ├── notifier/
-│   │   ├── telegram.py      # Send w/ retry, respect 429 retry_after
+│   │   ├── telegram.py      # Send w/ retry, respect 429 retry_after; supports photo+caption
 │   │   ├── format.py        # Event → Telegram message string (pure)
+│   │   ├── staticmap.py     # Render PNG of spawn/raid location via OSM tiles + markers
 │   │   └── digest.py        # Periodic digest scheduler
 │   ├── bot/
-│   │   └── commands.py      # /wanted /mute /radius /iv /raidtier /raidboss /pvprank
-│   │                        # /nearby /digest /silencethreshold /silencealert
-│   │                        # /status /audit /stats /shinyalert
+│   │   ├── commands.py      # /wanted /mute /radius /iv /raidtier /raidboss /pvprank
+│   │                        # /nearby /digest /silencethreshold /silencealert /follow
+│   │                        # /status /audit /stats /shinyalert /mapimage
+│   │   └── location.py      # Handlers for Telegram Location + edited_message (live updates)
 │   ├── ops/
 │   │   ├── silence.py       # Silence-detection background task
 │   │   └── housekeeping.py  # Vacuum events_active, daily backup trigger, disk checks
@@ -133,7 +135,8 @@ Stdlib `sqlite3` with parameterized queries is enough at this scale. SQLAlchemy 
         │
         ▼
 4. Distance filter (cheap reject)
-   - Drop if haversine(home, event) > radius
+   - proximity_center = live_location if follow_enabled && location fresh (≤ follow_stale_min), else home
+   - Drop if haversine(proximity_center, event) > radius
         │
         ▼
 5. Persist: INSERT events_active(event_id, …, expires_at)
@@ -149,16 +152,21 @@ Stdlib `sqlite3` with parameterized queries is enough at this scale. SQLAlchemy 
         │
         match=True
         ▼
-7. format.format_alert(event, match_reason) → Telegram message string
+7. format.format_alert(event, match_reason) → Telegram caption string
         │
         ▼
-8. notifier.telegram.send(message, chat_ids)
+8. staticmap.render(event, proximity_center) → PNG bytes (optional)
+   - Skipped if map_image_enabled = False
+   - On failure (OSM tiles unreachable, PIL error) → log + proceed to text-only fallback
+        │
+        ▼
+9. notifier.telegram.send(caption, chat_ids, photo=png_bytes)
    - 429 → respect retry_after
    - 5xx / network → 3 retries with backoff 1s/2s/4s
    - 401 (bad token) → set telegram_healthy=False, audit FAILED, continue
         │
         ▼
-9. db.record_alert(event, match_reason, status, telegram_message_id)
+10. db.record_alert(event, match_reason, status, telegram_message_id)
         │
         ▼
    Respond 200.
@@ -188,6 +196,8 @@ Stdlib `sqlite3` with parameterized queries is enough at this scale. SQLAlchemy 
 | `/nearby [kind] [radius]` | Pull current active sightings |
 | `/digest <interval>` / `/digest off` | Enable/disable periodic digest |
 | `/silencethreshold <duration>` / `/silencealert on|off` | Configure silence detection |
+| `/follow on` / `/follow off` / `/follow status` | Enable using live location as proximity center. Requires you to also share live location via Telegram's attach → location → "Share My Live Location" UI. |
+| `/mapimage on` / `/mapimage off` | Toggle attaching static map images to alerts (default on) |
 | `/status` | Current config + last event timestamp + telegram_healthy + counts |
 | `/audit [N]` | Last N events (matched + muted + failed) with reason |
 | `/stats today` | Totals + top species + top bosses |
@@ -198,7 +208,22 @@ All commands restricted to `ALLOWED_CHAT_IDS`. Anyone else: silent ignore.
 
 ### 6.1 Distance
 
-Haversine on `(home_lat, home_lng)` vs `(event_lat, event_lng)`. For SQL queries (`/nearby`, digest), prefilter rows with a lat/lng bounding box, then haversine in Python on survivors.
+Haversine on `(proximity_center_lat, proximity_center_lng)` vs `(event_lat, event_lng)`.
+
+The proximity center is resolved per-event:
+
+```python
+def proximity_center(config) -> tuple[float, float]:
+    if (config.follow_enabled
+        and config.live_location_updated_at is not None
+        and (now() - config.live_location_updated_at) <= config.follow_stale_min * 60):
+        return (config.live_lat, config.live_lng)
+    return (config.home_lat, config.home_lng)
+```
+
+When live location goes stale, the next event silently falls back to home coords. A one-shot Telegram notice fires the first time fallback happens after live location was active (see §8.1).
+
+For SQL queries (`/nearby`, digest), prefilter rows with a lat/lng bounding box centered on the current proximity center, then haversine in Python on survivors.
 
 ### 6.2 Species
 
@@ -299,8 +324,8 @@ The returned `reason` string is written to `audit_log.matched_by`.
 | Layer | Lives in | Purpose |
 |---|---|---|
 | Secrets | `.env` (gitignored) | `TELEGRAM_BOT_TOKEN`, `WEBHOOK_SECRET`, `ALLOWED_CHAT_IDS` |
-| Boot defaults | `config.yaml` | `HOME_LAT`, `HOME_LNG`, default `RADIUS_M`, `IV_FLOOR`, `RAID_TIER_FLOOR`, `GL_RANK_FLOOR`, `UL_RANK_FLOOR`, `SILENCE_THRESHOLD_MIN`, `DIGEST_INTERVAL_MIN` (0 = off) |
-| Live state | SQLite | Anything the bot can change at runtime (wanted list, mute, current radius/iv overrides, digest interval) |
+| Boot defaults | `config.yaml` | `HOME_LAT`, `HOME_LNG`, default `RADIUS_M`, `IV_FLOOR`, `RAID_TIER_FLOOR`, `GL_RANK_FLOOR`, `UL_RANK_FLOOR`, `SILENCE_THRESHOLD_MIN`, `DIGEST_INTERVAL_MIN` (0 = off), `MAP_IMAGE_ENABLED` (default true), `MAP_ZOOM` (default 16), `MAP_SIZE_PX` (default `[600, 400]`), `FOLLOW_STALE_MIN` (default 10) |
+| Live state | SQLite | Anything the bot can change at runtime (wanted list, mute, current radius/iv overrides, digest interval, follow_enabled, live_lat, live_lng, live_location_updated_at, live_location_fallback_notified, map_image_enabled override) |
 
 Read order: live state overrides yaml defaults overrides nothing. Secrets only ever from `.env`.
 
@@ -309,7 +334,7 @@ Read order: live state overrides yaml defaults overrides nothing. Secrets only e
 | Table | Purpose |
 |---|---|
 | `schema_version` | Migration tracking |
-| `config_kv` | Single-row config overrides (radius, iv_floor, raid_tier_floor, gl_rank_floor, ul_rank_floor, shiny_alert, mute_until, digest_interval_min, silence_threshold_min, silence_alert_enabled) |
+| `config_kv` | Single-row config overrides (radius, iv_floor, raid_tier_floor, gl_rank_floor, ul_rank_floor, shiny_alert, mute_until, digest_interval_min, silence_threshold_min, silence_alert_enabled, map_image_enabled, follow_enabled, live_lat, live_lng, live_location_updated_at, live_location_fallback_notified) |
 | `wanted_species` | (pokemon_id, form_id_or_null, is_wildcard, added_at) — see §6.2 for lookup semantics |
 | `raid_boss_allowlist` | (pokemon_id, added_at) |
 | `events_active` | (event_id PK, kind, species_or_boss_id, form_id, lat, lng, iv_percent, cp, level, pvp_great_rank, pvp_ultra_rank, raid_level, gym_name, shiny, expires_at, inserted_at) |
@@ -317,6 +342,31 @@ Read order: live state overrides yaml defaults overrides nothing. Secrets only e
 | `audit_log` | (id, event_id, kind, status, matched_by, telegram_message_id, error, ts) — full history of decisions |
 
 WAL mode + `busy_timeout=5s`. Single writer in practice (webhook + bot share one asyncio loop).
+
+### 7.3 Static map images
+
+- Rendered with the `staticmap` Python library against the standard OSM tile server (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`), respecting OSM's tile usage policy (low volume, sensible User-Agent, no scraping).
+- Default: zoom 16, 600×400 px. PNG output, sent via Telegram `sendPhoto` with the formatted text as the caption (Telegram caption limit is 1024 chars — well within our message size).
+- Markers:
+  - **Monsters:** one marker at the spawn coords.
+  - **Raids:** one marker at the gym coords.
+  - **Plus** a smaller marker at the current proximity center (home or live location) when within view, for distance context.
+- Tile cache: `staticmap` caches tiles in-memory per process; on a Pi at our volume, no on-disk tile cache is needed in v1.
+- If `MAP_IMAGE_ENABLED=false` (config flag or `/mapimage off`), skip the rendering step entirely and send text-only.
+- On render failure (network timeout to tile server, PIL error, etc.), fall back to a text-only message (with the Google/Apple Maps URLs in the body). Failure is logged but does not block the alert.
+
+### 7.4 Live-location-following proximity
+
+- Telegram supports user-initiated "live location" sharing for up to 8 hours per share. The bot cannot initiate or sustain it — the user must tap **attach → location → "Share My Live Location"** in Telegram and pick the bot as the recipient.
+- `bot/location.py` handles two update kinds from `python-telegram-bot`:
+  - A `Message` with `message.location` and `message.location.live_period > 0` — start of a live share.
+  - An `edited_message` with an updated `location` for the same `message_id` — periodic refresh.
+- Each update writes `(live_lat, live_lng, live_location_updated_at = now)` to `config_kv`.
+- `follow_enabled` is a separate toggle controlled by `/follow on|off`. The user can have live location flowing in without using it as the proximity center.
+- Resolution rule (in §6.1): live location is used **only if** `follow_enabled` AND `now - live_location_updated_at <= follow_stale_min * 60`. Otherwise fall back to home.
+- When a fallback occurs while `follow_enabled=true` and the previous resolution used live location, send a one-shot Telegram notice ("⚠️ Live location stale — falling back to home coords") and set `live_location_fallback_notified=true`. Reset the flag when fresh live location arrives.
+- `/follow status` reports: enabled?, last update age, current resolved center.
+- When the user stops sharing live location (Telegram does not send an explicit "stopped" event — it just stops sending updates), the staleness check naturally handles it.
 
 ## 8. Error handling and operations
 
@@ -335,7 +385,11 @@ WAL mode + `busy_timeout=5s`. Single writer in practice (webhook + bot share one
 | Cloudflare tunnel disconnect | `cloudflared` auto-reconnects (separate systemd unit, `Restart=always`); detected via §8.4 silence detection |
 | Upstream community pauses | Same as tunnel — detected via silence detection |
 | Clock skew | `systemd-timesyncd` enabled; warn on events with `despawn_at > 60s` in the past |
-| Pi reboot / power loss | Both systemd services restart; SQLite WAL recovers; vacuum clears stale `events_active` on next tick |
+| OSM tile fetch failure (timeout, 4xx, 5xx) | Log, skip image, send text-only alert (with Maps URLs in body). Alert is never blocked on image render. |
+| Pillow / `staticmap` exception during render | Same as above — fall back to text-only. |
+| Live location stale (`follow_enabled` and previously-fresh location now > `follow_stale_min` old) | Fall back to home for proximity. Send one-shot Telegram notice. Reset flag when fresh update arrives. |
+| Telegram Location update arrives from a non-allowed chat ID | Silent ignore (same policy as commands). |
+| Pi reboot / power loss | Both systemd services restart; SQLite WAL recovers; vacuum clears stale `events_active` on next tick. Live location state is **not** persisted across reboots beyond what's in `config_kv`; if `follow_enabled` was on, next event will see stale location and fall back to home + notify. |
 
 ### 8.2 Always-200 policy
 
@@ -402,8 +456,11 @@ Keep last 7. Few-MB footprint.
 | `filters/*` | Heavy — pure functions, trivial to test |
 | `decide.should_push_alert` | Heavy — covers the matrix of match conditions |
 | `notifier/format.py` | Snapshot tests against `tests/snapshots/*.txt` |
-| `webhook` end-to-end | One happy path per event kind, using a fake-Telegram recorder |
-| `bot/commands.py` | Light — one test per command verifying DB state |
+| `notifier/staticmap.py` | Tests with mocked tile fetcher: correct markers placed, fallback on tile-fetch failure returns None, monkey-patched PIL exception path returns None |
+| `webhook` end-to-end | One happy path per event kind, using a fake-Telegram recorder (asserts `sendPhoto` called when image enabled, `sendMessage` when disabled or render fails) |
+| `bot/commands.py` | Light — one test per command verifying DB state (including `/follow on|off|status`, `/mapimage on|off`) |
+| `bot/location.py` | Tests for: initial live-share message stores location, edited_message updates timestamp, message from non-allowed chat is ignored |
+| Proximity center resolution | Direct tests of `proximity_center()`: fresh live + follow_enabled → live; stale live + follow_enabled → home; follow_disabled → home regardless |
 | `db/repo.py` | Exercised transitively via filter + command tests against temp SQLite |
 | `silence.py` | One test with a mocked clock |
 | Cloudflare / systemd / journald | Not tested — manual smoke checklist in `deploy/README.md` |
@@ -437,6 +494,9 @@ Seeded from Poracle / PokéAlarm public docs at write-time; refined once we see 
 6. `/nearby` with several active events seeded → returns them sorted by distance.
 7. Kill `cloudflared` → after 45 min, silence alert arrives.
 8. Reboot Pi → both services come back up unaided.
+9. Trigger a fixture alert → Telegram message arrives with map image attached and caption present.
+10. `/mapimage off` → next fixture alert is text-only with Maps links. `/mapimage on` → image returns.
+11. Share live location with the bot via Telegram, then `/follow on` → trigger a fixture event near that location but >1km from home → alert fires (proves live location is the proximity center). Stop sharing → wait > `follow_stale_min` → next fixture event >1km from home is filtered out, and a one-shot "Live location stale" notice arrives.
 
 ## 10. Deployment
 
@@ -445,6 +505,8 @@ Seeded from Poracle / PokéAlarm public docs at write-time; refined once we see 
 - Raspberry Pi OS (or any Linux), Python 3.11+, `git`, `sqlite3` CLI.
 - `cloudflared` installed (official Cloudflare APT package or binary).
 - `systemd-timesyncd` enabled.
+- Python deps include `Pillow` (system libs: `libjpeg`, `zlib`) for `staticmap` rendering. On Raspberry Pi OS: `sudo apt install libjpeg-dev zlib1g-dev`. Wheels usually cover the rest.
+- Outbound HTTPS reachable from the Pi to `tile.openstreetmap.org` and `api.telegram.org`.
 
 ### 10.2 Services
 
@@ -487,8 +549,6 @@ The implementation plan will note this as a parallel track to the code work. Cod
 - Multi-user support (account isolation, per-user config).
 - Anti-spam / cooldown beyond mute (e.g. "don't alert me on the same species more than once an hour").
 - Web dashboard.
-- Maps / image attachments in Telegram messages (text + Google/Apple Maps links only).
-- Live-location-following proximity (fixed home coords only).
 - Quest / invasion / lure / gym-control events (the protocol supports them; we ignore in v1).
 - Direct scraping of Discord channels (we use webhooks only).
 - Pokémon Go API scraping (out of scope and explicitly avoided per §2).
