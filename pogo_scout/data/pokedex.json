@@ -1,0 +1,16 @@
+{
+  "species": {
+    "1": {"name": "Bulbasaur"},
+    "19": {"name": "Rattata"},
+    "37": {"name": "Vulpix"},
+    "246": {"name": "Larvitar"},
+    "247": {"name": "Pupitar"},
+    "248": {"name": "Tyranitar"},
+    "384": {"name": "Rayquaza"},
+    "445": {"name": "Garchomp"},
+    "149": {"name": "Dragonite"}
+  },
+  "forms": {
+    "37": {"65": "Alolan"}
+  }
+}
