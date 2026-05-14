@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
 from pogo_scout.db import repo
@@ -121,3 +122,40 @@ def cmd_wanted(args: Sequence[str], *, conn) -> str:
         return f"added: {rest}"
     repo.wanted_remove(conn, w)
     return f"removed: {rest}"
+
+
+def parse_mute_duration(text: str, *, now: datetime) -> datetime | None:
+    s = text.strip().lower()
+    if s.startswith("until "):
+        hhmm = s[len("until "):].replace(":", "")
+        if len(hhmm) == 4 and hhmm.isdigit():
+            h, mn = int(hhmm[:2]), int(hhmm[2:])
+            target = now.astimezone(timezone.utc).replace(
+                hour=h, minute=mn, second=0, microsecond=0
+            )
+            if target <= now:
+                target += timedelta(days=1)
+            return target
+        return None
+    m = re.fullmatch(r"(\d+)\s*([hm])", s)
+    if not m:
+        return None
+    n = int(m.group(1))
+    if m.group(2) == "h":
+        return now + timedelta(hours=n)
+    return now + timedelta(minutes=n)
+
+
+def cmd_mute(args, *, conn, now: datetime) -> str:
+    if not args:
+        return "usage: /mute <30m|8h|until HHMM>"
+    until = parse_mute_duration(" ".join(args), now=now)
+    if until is None:
+        return "usage: /mute <30m|8h|until HHMM>"
+    repo.set_kv(conn, "mute_until", until.astimezone(timezone.utc).isoformat())
+    return f"muted until {until.isoformat()}"
+
+
+def cmd_unmute(args, *, conn) -> str:
+    repo.set_kv(conn, "mute_until", "")
+    return "unmuted"
