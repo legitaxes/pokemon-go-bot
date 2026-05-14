@@ -161,3 +161,37 @@ def cmd_mute(args, *, conn, now: datetime) -> str:
 def cmd_unmute(args, *, conn) -> str:
     repo.set_kv(conn, "mute_until", "")
     return "unmuted"
+
+
+def cmd_raidboss(args, *, conn) -> str:
+    from pogo_scout.pokedex import name_for, PokedexLookupError, parse_species_input
+
+    if not args:
+        return "usage: /raidboss add|remove|list|clear <species>"
+    sub = args[0].lower()
+    if sub == "list":
+        ids = repo.raid_boss_list(conn)
+        if not ids:
+            return "raid boss allowlist is empty (all bosses match)"
+        names = []
+        for pid in sorted(ids):
+            try:
+                names.append(name_for(pid, None))
+            except PokedexLookupError:
+                names.append(f"#{pid}")
+        return "Allowed raid bosses:\n" + "\n".join(f"- {n}" for n in names)
+    if sub == "clear":
+        repo.raid_boss_clear(conn)
+        return "raid boss allowlist cleared"
+    if sub not in ("add", "remove") or len(args) < 2:
+        return "usage: /raidboss add|remove|list|clear <species>"
+    raw = " ".join(args[1:])
+    try:
+        pid, _fid, _wild = parse_species_input(raw)
+    except PokedexLookupError:
+        return f"unknown species: {raw}"
+    if sub == "add":
+        repo.raid_boss_add(conn, pid)
+        return f"raid boss added: {raw}"
+    repo.raid_boss_remove(conn, pid)
+    return f"raid boss removed: {raw}"
