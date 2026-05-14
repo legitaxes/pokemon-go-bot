@@ -43,3 +43,8 @@ def test_cmd_unmute_clears(db):
     reply = cmd_unmute([], conn=db)
     assert "unmuted" in reply.lower()
     assert repo.get_kv(db, "mute_until", default="") == ""
+
+
+def test_parse_duration_until_invalid_time():
+    assert parse_mute_duration("until 2500", now=NOW) is None
+    assert parse_mute_duration("until 1267", now=NOW) is None

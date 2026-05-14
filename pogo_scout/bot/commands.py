@@ -130,6 +130,8 @@ def parse_mute_duration(text: str, *, now: datetime) -> datetime | None:
         hhmm = s[len("until "):].replace(":", "")
         if len(hhmm) == 4 and hhmm.isdigit():
             h, mn = int(hhmm[:2]), int(hhmm[2:])
+            if not (0 <= h <= 23 and 0 <= mn <= 59):
+                return None
             target = now.astimezone(timezone.utc).replace(
                 hour=h, minute=mn, second=0, microsecond=0
             )
