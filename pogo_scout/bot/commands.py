@@ -319,3 +319,28 @@ def cmd_digest(args, *, conn) -> str:
         return "usage: /digest <interval>|off"
     repo.set_kv(conn, "digest_interval_min", mins)
     return f"digest set to every {mins} minutes"
+
+
+def cmd_follow(args, *, conn, now: datetime) -> str:
+    if not args:
+        return "usage: /follow on|off|status"
+    sub = args[0].lower()
+    if sub == "on":
+        repo.set_kv(conn, "follow_enabled", True)
+        return "follow enabled — share live location via Telegram attach → location → Share Live Location"
+    if sub == "off":
+        repo.set_kv(conn, "follow_enabled", False)
+        return "follow disabled — using home coords"
+    if sub == "status":
+        enabled = repo.get_kv(conn, "follow_enabled", default=False)
+        if not enabled:
+            return "follow: disabled"
+        upd_iso = repo.get_kv(conn, "live_location_updated_at", default="")
+        if not upd_iso:
+            return "follow: enabled but no live location received yet"
+        upd = datetime.fromisoformat(upd_iso)
+        age_min = int((now - upd).total_seconds() // 60)
+        threshold = repo.get_kv(conn, "follow_stale_min", default=10)
+        state = "fresh" if age_min < threshold else "stale"
+        return f"follow: enabled, live location {age_min}m old ({state})"
+    return "usage: /follow on|off|status"
