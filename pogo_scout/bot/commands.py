@@ -258,3 +258,64 @@ def cmd_nearby(args, *, conn, config, now: datetime) -> str:
         if within_radius(center, (r["lat"], r["lng"]), radius_m):
             events.append(_row_to_event(r))
     return format_nearby_list(events, proximity_center=center, now=now)
+
+
+def cmd_status(args, *, conn, snapshot: dict, now: datetime) -> str:
+    last = repo.get_last_webhook_received_at(conn)
+    age = "never" if last is None else f"{int((now - last).total_seconds())}s"
+    health = "ok" if snapshot.get("telegram_healthy", True) else "DEGRADED"
+    return (
+        "Status:\n"
+        f"- uptime: {snapshot.get('uptime_s', 0)}s\n"
+        f"- last webhook: {age} ago\n"
+        f"- telegram: {health}\n"
+        f"- events_active: {snapshot.get('events_active_count', 0)}\n"
+        f"- radius: {repo.get_kv(conn, 'radius_m', default=1000)}m\n"
+        f"- iv floor: {repo.get_kv(conn, 'iv_floor', default=90.0)}%\n"
+        f"- raid tier floor: {repo.get_kv(conn, 'raid_tier_floor', default=5)}\n"
+    )
+
+
+def cmd_audit(args, *, conn) -> str:
+    limit = 10
+    if args and args[0].isdigit():
+        limit = int(args[0])
+    rows = repo.recent_audit(conn, limit=limit)
+    if not rows:
+        return "no audit entries"
+    lines = ["Recent audit:"]
+    for r in rows:
+        bits = [r["ts"][11:19], r["kind"], r["status"], r["event_id"]]
+        if r["matched_by"]:
+            bits.append(f"({r['matched_by']})")
+        if r["error"]:
+            bits.append(f"err={r['error']}")
+        lines.append(" ".join(bits))
+    return "\n".join(lines)
+
+
+def cmd_stats(args, *, conn, now: datetime) -> str:
+    rows = conn.execute(
+        "SELECT status, COUNT(*) FROM audit_log GROUP BY status"
+    ).fetchall()
+    by_status = {s: c for s, c in rows}
+    return (
+        "Today:\n"
+        f"- DISPATCHED: {by_status.get('DISPATCHED', 0)}\n"
+        f"- NO_MATCH: {by_status.get('NO_MATCH', 0)}\n"
+        f"- MUTED: {by_status.get('MUTED', 0)}\n"
+        f"- FAILED: {by_status.get('FAILED', 0)}\n"
+    )
+
+
+def cmd_digest(args, *, conn) -> str:
+    if not args:
+        return "usage: /digest <interval>|off"
+    if args[0].lower() == "off":
+        repo.set_kv(conn, "digest_interval_min", 0)
+        return "digest disabled"
+    mins = _parse_duration_minutes(args[0])
+    if mins is None or mins <= 0:
+        return "usage: /digest <interval>|off"
+    repo.set_kv(conn, "digest_interval_min", mins)
+    return f"digest set to every {mins} minutes"
