@@ -1,0 +1,13 @@
+home_lat: 1.3521
+home_lng: 103.8198
+radius_m: 1000
+iv_floor: 90.0
+raid_tier_floor: 5
+gl_rank_floor: 5
+ul_rank_floor: 5
+silence_threshold_min: 45
+digest_interval_min: 0
+map_image_enabled: true
+map_zoom: 16
+map_size_px: [600, 400]
+follow_stale_min: 10
