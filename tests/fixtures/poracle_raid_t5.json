@@ -1,0 +1,15 @@
+{
+  "type": "raid",
+  "message": {
+    "gym_id": "gym-abc",
+    "gym_name": "Bishan Park Gym",
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "level": 5,
+    "pokemon_id": 384,
+    "form": 0,
+    "start": 1747232400,
+    "end": 1747235100,
+    "team_id": 1
+  }
+}

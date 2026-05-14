@@ -1,0 +1,23 @@
+{
+  "type": "monster",
+  "message": {
+    "encounter_id": "12345",
+    "spawnpoint_id": "abc",
+    "pokemon_id": 246,
+    "form": 0,
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "iv": 98.0,
+    "cp": 612,
+    "pokemon_level": 25,
+    "individual_attack": 14,
+    "individual_defense": 15,
+    "individual_stamina": 15,
+    "disappear_time": 1747234500,
+    "shiny": false,
+    "pvp_rankings_great_league": [
+      {"rank": 3, "cp": 1489, "level": 24.5, "percentage": 99.2}
+    ],
+    "pvp_rankings_ultra_league": []
+  }
+}

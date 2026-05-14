@@ -1,0 +1,13 @@
+{
+  "type": "raid",
+  "message": {
+    "gym_id": "gym-egg",
+    "gym_name": "MacRitchie Gym",
+    "latitude": 1.343,
+    "longitude": 103.815,
+    "level": 5,
+    "pokemon_id": 0,
+    "start": 1747232400,
+    "end": 1747235100
+  }
+}

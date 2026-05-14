@@ -1,0 +1,14 @@
+{
+  "type": "raid",
+  "message": {
+    "gym_id": "gym-xyz",
+    "gym_name": "Marina Gym",
+    "latitude": 1.28,
+    "longitude": 103.85,
+    "level": "mega",
+    "pokemon_id": 445,
+    "form": 0,
+    "start": 1747232400,
+    "end": 1747235100
+  }
+}

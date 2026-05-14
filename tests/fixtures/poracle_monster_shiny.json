@@ -1,0 +1,16 @@
+{
+  "type": "monster",
+  "message": {
+    "encounter_id": "77777",
+    "spawnpoint_id": "ghi",
+    "pokemon_id": 1,
+    "form": 0,
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "iv": 4.4,
+    "cp": 12,
+    "pokemon_level": 1,
+    "disappear_time": 1747234500,
+    "shiny": true
+  }
+}

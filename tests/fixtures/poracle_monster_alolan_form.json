@@ -1,0 +1,15 @@
+{
+  "type": "monster",
+  "message": {
+    "encounter_id": "88888",
+    "spawnpoint_id": "jkl",
+    "pokemon_id": 37,
+    "form": 65,
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "iv": 80.0,
+    "cp": 300,
+    "pokemon_level": 20,
+    "disappear_time": 1747234500
+  }
+}

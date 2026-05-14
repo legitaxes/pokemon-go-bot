@@ -1,0 +1,12 @@
+{
+  "type": "monster",
+  "message": {
+    "encounter_id": "55555",
+    "spawnpoint_id": "def",
+    "pokemon_id": 246,
+    "form": 0,
+    "latitude": 1.3521,
+    "longitude": 103.8198,
+    "disappear_time": 1747234500
+  }
+}
