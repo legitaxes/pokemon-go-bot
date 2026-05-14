@@ -195,3 +195,66 @@ def cmd_raidboss(args, *, conn) -> str:
         return f"raid boss added: {raw}"
     repo.raid_boss_remove(conn, pid)
     return f"raid boss removed: {raw}"
+
+
+from pogo_scout.events import MonsterEvent, RaidEvent
+from pogo_scout.filters.distance import proximity_center, haversine_m, within_radius
+from pogo_scout.notifier.format import format_nearby_list
+
+
+def _safe_name(pokemon_id: int | None, form_id: int | None) -> str:
+    if pokemon_id is None:
+        return "Egg"
+    from pogo_scout.pokedex import name_for, PokedexLookupError
+    try:
+        return name_for(pokemon_id, form_id)
+    except PokedexLookupError:
+        return f"#{pokemon_id}"
+
+
+def _row_to_event(row: dict) -> MonsterEvent | RaidEvent:
+    if row["kind"] == "monster":
+        return MonsterEvent(
+            event_id=row["event_id"],
+            pokemon_id=row["pokemon_or_boss_id"] or 0,
+            form_id=row["form_id"],
+            species_name=_safe_name(row["pokemon_or_boss_id"], row["form_id"]),
+            lat=row["lat"], lng=row["lng"],
+            iv_percent=row["iv_percent"], cp=row["cp"], level=row["level"],
+            pvp_great_rank=row["pvp_great_rank"], pvp_ultra_rank=row["pvp_ultra_rank"],
+            shiny=bool(row["shiny"]),
+            despawn_at=datetime.fromisoformat(row["expires_at"]),
+            encounter_id=None,
+            received_at=datetime.fromisoformat(row["expires_at"]),
+        )
+    return RaidEvent(
+        event_id=row["event_id"],
+        gym_id="", gym_name=row["gym_name"] or "",
+        lat=row["lat"], lng=row["lng"],
+        raid_level=row["raid_level"],
+        boss_pokemon_id=row["pokemon_or_boss_id"],
+        boss_form_id=row["form_id"],
+        boss_name=_safe_name(row["pokemon_or_boss_id"], row["form_id"]) if row["pokemon_or_boss_id"] else None,
+        start_at=datetime.fromisoformat(row["expires_at"]),
+        end_at=datetime.fromisoformat(row["expires_at"]),
+        is_shadow=False, is_egg=bool(row["is_egg"]),
+        received_at=datetime.fromisoformat(row["expires_at"]),
+    )
+
+
+def cmd_nearby(args, *, conn, config, now: datetime) -> str:
+    kind = None
+    radius_override: int | None = None
+    for a in args:
+        if a in ("monsters", "raids"):
+            kind = "monster" if a == "monsters" else "raid"
+        elif a.isdigit():
+            radius_override = int(a)
+    radius_m = radius_override or config.radius_m
+    center = proximity_center(config, now)
+    rows = repo.query_active(conn, center=center, radius_m=radius_m, now=now, kind=kind)
+    events = []
+    for r in rows:
+        if within_radius(center, (r["lat"], r["lng"]), radius_m):
+            events.append(_row_to_event(r))
+    return format_nearby_list(events, proximity_center=center, now=now)
