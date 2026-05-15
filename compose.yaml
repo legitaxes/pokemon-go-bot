@@ -1,16 +1,18 @@
-# Dockge stack for pogo-scout. Drop this directory into /opt/stacks/pogo-scout/
-# (or wherever Dockge scans) and Dockge will pick it up.
+# Dockge stack for pogo-scout.
 #
-# Required side-by-side files:
-#   .env                — secrets (copy from .env.example, fill in)
-#   data/config.yaml    — bot config (copy from config.yaml.example, fill in)
+# Paste this file into the Dockge UI ("Create Stack" → name "pogo-scout" →
+# paste below). Dockge writes it to /opt/stacks/pogo-scout/compose.yaml.
 #
-# The data/ directory is created automatically on first start and persists the
-# SQLite DB. Back it up like any other directory on your host.
+# Before deploying, on the Dockge host:
+#   /opt/stacks/pogo-scout/.env                — fill via Dockge's env editor
+#   /opt/stacks/pogo-scout/data/config.yaml    — create once, see deploy/dockge.md
+#
+# The data/ directory persists the SQLite DB across redeploys.
 
 services:
   pogo-scout:
-    build: .
+    image: ghcr.io/legitaxes/pokemon-go-bot:latest
+    pull_policy: always   # so redeploys from Dockge pick up new :latest images
     container_name: pogo-scout
     restart: unless-stopped
     env_file:
