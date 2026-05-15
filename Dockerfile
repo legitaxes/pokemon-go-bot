@@ -16,8 +16,8 @@ COPY pyproject.toml ./
 COPY pogo_scout ./pogo_scout
 RUN pip install --no-cache-dir .
 
-# Non-root user. Bind-mounted /data must be writable by uid 1000 on the host.
-RUN useradd --create-home --uid 1000 pogo \
+# Non-root user. Bind-mounted /data must be writable by uid 568 on the host.
+RUN useradd --create-home --uid 568 pogo \
     && mkdir -p /data \
     && chown -R pogo:pogo /data
 USER pogo

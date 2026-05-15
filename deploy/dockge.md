@@ -62,11 +62,11 @@ sudo nano data/config.yaml
 Set `home_lat` / `home_lng` and tune any defaults. Everything else can be changed
 later from Telegram (`/setradius`, `/setiv`, etc.).
 
-Make sure the `data/` directory is writable by uid 1000 (the `pogo` user inside
+Make sure the `data/` directory is writable by uid 568 (the `pogo` user inside
 the container):
 
 ```bash
-sudo chown -R 1000:1000 data
+sudo chown -R 568:568 data
 ```
 
 ## 5. Deploy from Dockge
@@ -131,4 +131,4 @@ WAL mode is on, so the online `.backup` is safe while the bot is running.
 | Bot starts, no Telegram replies to `/start` | Wrong `TELEGRAM_BOT_TOKEN`, or your chat id isn't in `ALLOWED_CHAT_IDS`. |
 | Webhook returns 401 | Header `X-Webhook-Secret` missing or doesn't match `.env`. |
 | Webhook returns 502 from Cloudflare | The dashboard ingress points at the wrong service name; must be `http://pogo-scout:8000`. |
-| Permission denied writing `/data/pogo_scout.db` | `data/` is owned by host root, not uid 1000. Run `sudo chown -R 1000:1000 data`. |
+| Permission denied writing `/data/pogo_scout.db` | `data/` is owned by host root, not uid 568. Run `sudo chown -R 568:568 data`. |
