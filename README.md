@@ -4,14 +4,14 @@ Personal Pokémon Go scout bot for Singapore.
 
 Receives webhook events from a community scanner (Poracle / PokéAlarm protocol),
 filters within a proximity radius (home or live location), and sends Telegram
-alerts with map images. Runs on a Raspberry Pi behind a Cloudflare Tunnel.
+alerts with map images. Runs in Docker behind Tailscale Funnel (or on a Raspberry Pi behind a Cloudflare Tunnel).
 
 ## Quick start
 
 Two supported deployment paths:
 
-- **Dockge / Docker Compose** — see [deploy/dockge.md](deploy/dockge.md). Bundled `cloudflared` sidecar, bind-mounted `data/` for the SQLite DB. Recommended.
-- **Raspberry Pi (bare metal + systemd)** — see [deploy/README.md](deploy/README.md). Cloudflared installed on the host, the bot runs as a systemd unit.
+- **Dockge / Docker Compose** — see [deploy/dockge.md](deploy/dockge.md). Bot image pulled from `ghcr.io/legitaxes/pokemon-go-bot`, Tailscale Funnel sidecar exposes `/webhook` publicly without a domain. Recommended.
+- **Raspberry Pi (bare metal + systemd)** — see [deploy/README.md](deploy/README.md). Bot runs as a systemd unit behind a Cloudflare Tunnel.
 
 ## Telegram commands
 

@@ -4,45 +4,67 @@ Deployment model: paste `compose.yaml` into Dockge's UI. No repo on the host.
 Image is built by GitHub Actions and published to
 `ghcr.io/legitaxes/pokemon-go-bot:latest` (multi-arch: linux/amd64 + linux/arm64).
 
-Two containers run on a private bridge network:
+Public access: **Tailscale Funnel** (free, no domain required). The bot is
+reachable at `https://pogo-scout.<your-tailnet>.ts.net/webhook` over the
+public internet, while everything else (`/healthz`, etc.) returns 404 at
+Tailscale's edge.
+
+Two containers run in the stack:
 
 | Container | Purpose |
 |---|---|
 | `pogo-scout` | The bot. FastAPI webhook + Telegram client. |
-| `pogo-scout-tunnel` | `cloudflared` sidecar. Outbound-only tunnel to Cloudflare. |
+| `pogo-scout-tailscale` | Tailscale sidecar. Joins your tailnet, exposes `/webhook` via Funnel. |
 
-The Dockge host never exposes port 8000 publicly. `/webhook` reaches the bot only
-through the Cloudflare tunnel (path-scoped); `/healthz` stays internal to the
-docker network.
+The homeserver never exposes port 8000 publicly. `/webhook` reaches the bot only
+through the Tailscale edge (path-scoped).
 
 ---
 
 ## One-time: make the GHCR package public
 
-The first push to `main` after this guide existed triggered a GitHub Actions run
-that published the image to `ghcr.io/legitaxes/pokemon-go-bot`. Packages start
-**private**, so the Dockge host can't pull them anonymously. Make it public once:
+The first push to `main` triggered a GitHub Actions run that published the image
+to `ghcr.io/legitaxes/pokemon-go-bot`. Packages start **private**, so the Dockge
+host can't pull them anonymously. Make it public once:
 
-1. Open https://github.com/legitaxes?tab=packages
+1. https://github.com/legitaxes?tab=packages
 2. Click `pokemon-go-bot` → **Package settings** (right sidebar)
-3. Scroll to **Danger Zone** → **Change visibility** → **Public** → confirm.
+3. **Danger Zone** → **Change visibility** → **Public** → confirm.
 
 (You only do this once. After that, every push to `main` rebuilds the same public image.)
 
 ---
 
-## 1. Create the Cloudflare Tunnel
+## 1. Set up Tailscale (free account, ~5 min)
 
-1. Cloudflare dashboard → **Zero Trust** → **Networks** → **Tunnels** → **Create a tunnel**.
-2. Pick **Cloudflared**, name it (e.g. `pogo-scout`).
-3. On the install step, copy the **token** out of the `--token <TOKEN>` snippet.
-4. On the **Public Hostnames** tab add one entry:
-   - Subdomain + domain: `pogo-scout.<your-domain>`
-   - Path: `webhook`
-   - Service: **HTTP** → `pogo-scout:8000`
-5. Save. The tunnel is now provisioned but won't connect until cloudflared runs.
+If you already use Tailscale, skip to step 1.4.
 
-Only `/webhook` is exposed publicly. Any other path returns 404 at the Cloudflare edge.
+### 1.1 Create a Tailscale account
+Go to https://login.tailscale.com/start. Sign up with Google / GitHub / Microsoft / etc.
+The Free plan covers personal use (up to 100 devices).
+
+### 1.2 Enable Funnel
+1. Open https://login.tailscale.com/admin/dns
+2. Verify **MagicDNS** is enabled. (It is by default.)
+3. Open https://login.tailscale.com/admin/settings/funnel
+4. Confirm Funnel is enabled. (It is by default; if not, toggle it on.)
+
+### 1.3 Generate an auth key
+1. Open https://login.tailscale.com/admin/settings/keys
+2. Click **Generate auth key…**
+3. Settings:
+   - **Reusable**: ✅ on (so you can re-deploy without regenerating)
+   - **Ephemeral**: ❌ off (we want persistent state in `./data/ts-state`)
+   - **Pre-approved**: ✅ on (skips a manual approval step)
+   - **Tags**: optional (e.g. `tag:pogo-scout`); leave blank for simplicity
+   - Expiry: 90 days is fine — the key is only used at first start. After that,
+     the container's stored credentials handle re-auth automatically.
+4. Generate, copy the key (`tskey-auth-...`).
+
+### 1.4 Note your tailnet name
+On https://login.tailscale.com/admin/machines you'll see your tailnet header,
+e.g. `mycoolname.ts.net`. Your bot will be reachable at
+`pogo-scout.mycoolname.ts.net` after deploy.
 
 ---
 
@@ -60,13 +82,13 @@ Dockge creates `/opt/stacks/pogo-scout/` with your compose file inside.
 
 ## 3. Fill in `.env` from Dockge
 
-Still in the stack page, click the **Env** tab. Paste:
+In the stack page, click the **Env** tab. Paste:
 
 ```env
 TELEGRAM_BOT_TOKEN=<token from @BotFather>
 WEBHOOK_SECRET=<output of: openssl rand -hex 32>
 ALLOWED_CHAT_IDS=<your numeric chat id, from @userinfobot>
-TUNNEL_TOKEN=<the token from step 1>
+TS_AUTHKEY=<the auth key from step 1.3>
 ```
 
 Save. Dockge writes this to `/opt/stacks/pogo-scout/.env`.
@@ -75,9 +97,7 @@ Save. Dockge writes this to `/opt/stacks/pogo-scout/.env`.
 
 ## 4. Create `data/config.yaml` on the host
 
-The bot needs `home_lat` / `home_lng` and a handful of tunable defaults at boot.
-These live in `data/config.yaml`, which Dockge can't manage through the UI
-(it's inside a bind-mounted directory, not the stack root). One-time SSH:
+The bot needs `home_lat` / `home_lng` at boot. One-time SSH on the Dockge host:
 
 ```bash
 sudo mkdir -p /opt/stacks/pogo-scout/data
@@ -90,19 +110,33 @@ sudo chown -R 568:568 /opt/stacks/pogo-scout/data
 
 Only `home_lat` and `home_lng` are required to change. Everything else can be
 tuned later from Telegram (`/radius`, `/iv`, `/raidtier`, etc.) and is persisted
-to the SQLite DB in `data/`.
+to the SQLite DB.
 
 ---
 
-## 5. Deploy
+## 5. Deploy, then enable Funnel (one-time)
 
-Back in Dockge UI: hit **Start** on the stack.
+In Dockge: hit **Start** on the stack.
 
-Dockge pulls `ghcr.io/legitaxes/pokemon-go-bot:latest`, pulls `cloudflared:latest`,
-and starts both. Tail logs via the **Logs** tab; you should see:
-
+Tail logs via the **Logs** tab; you should see:
+- `pogo-scout-tailscale`: `Success.` and a node URL like `https://pogo-scout.<tailnet>.ts.net`
 - `pogo-scout`: `Uvicorn running on http://0.0.0.0:8000`
-- `pogo-scout-tunnel`: `Registered tunnel connection`
+
+Now enable Funnel for `/webhook` — run this **once** on the Dockge host:
+
+```bash
+sudo docker exec pogo-scout-tailscale \
+  tailscale funnel --bg --set-path=/webhook http://localhost:8000/webhook
+```
+
+You'll see Tailscale confirm `Available on the internet` with your funnel URL.
+The state is persisted in `./data/ts-state`, so future container restarts
+automatically re-enable Funnel without re-running this command.
+
+To verify it's listening:
+```bash
+sudo docker exec pogo-scout-tailscale tailscale funnel status
+```
 
 ---
 
@@ -110,20 +144,25 @@ and starts both. Tail logs via the **Logs** tab; you should see:
 
 From your laptop:
 ```bash
-curl -X POST https://pogo-scout.<your-domain>/webhook \
+curl -X POST https://pogo-scout.<your-tailnet>.ts.net/webhook \
   -H "X-Webhook-Secret: <your WEBHOOK_SECRET>" \
   -H "Content-Type: application/json" \
   --data '[{"type":"monster","message":{"pokemon_id":25,"latitude":1.3521,"longitude":103.8198,"individual_attack":15,"individual_defense":15,"individual_stamina":15,"disappear_time":9999999999}}]'
 ```
-(Substitute your home coords for 1.3521/103.8198.) A Telegram message arrives
-within ~2s if Pikachu is on your wanted list, or you'll see it logged as
-`NO_MATCH` otherwise.
+(Substitute your home coords for 1.3521/103.8198.) Telegram message arrives
+within ~2 s if Pikachu is on your wanted list, else logged as `NO_MATCH`.
+
+Confirm `/healthz` is **NOT** publicly accessible:
+```bash
+curl -i https://pogo-scout.<your-tailnet>.ts.net/healthz
+# Expect: HTTP 404 from Tailscale. The bot never sees this request.
+```
 
 ---
 
 ## 7. Hand the URL + secret to your SG scanner community
 
-- URL: `https://pogo-scout.<your-domain>/webhook`
+- URL: `https://pogo-scout.<your-tailnet>.ts.net/webhook`
 - Header: `X-Webhook-Secret: <your WEBHOOK_SECRET>`
 
 The bot rejects any request missing the matching secret.
@@ -133,24 +172,22 @@ The bot rejects any request missing the matching secret.
 ## 8. Updates
 
 When you push code to `main`, GitHub Actions rebuilds and republishes `:latest`
-within a couple of minutes. To pick up the new image on the homeserver, hit
-**Stop** then **Start** in Dockge (or **Update** if your Dockge has that button)
-— `pull_policy: always` in the compose ensures the new image is fetched.
+within a couple of minutes. In Dockge, hit **Stop** then **Start** (or **Update**)
+— `pull_policy: always` ensures the new image is fetched.
 
-For a CLI update:
+CLI form:
 ```bash
 sudo docker compose -f /opt/stacks/pogo-scout/compose.yaml pull
 sudo docker compose -f /opt/stacks/pogo-scout/compose.yaml up -d
 ```
 
-DB migrations in `pogo_scout/db/migrations/` apply automatically on startup.
+DB migrations apply automatically on startup. Funnel state survives restarts.
 
 ---
 
 ## 9. Backups
 
-SQLite DB lives at `/opt/stacks/pogo-scout/data/pogo_scout.db`. Daily backup via
-host cron:
+SQLite DB lives at `/opt/stacks/pogo-scout/data/pogo_scout.db`. Daily backup:
 
 ```bash
 sudo crontab -e
@@ -166,9 +203,11 @@ WAL mode is on; the online `.backup` is safe while the bot is running.
 
 | Symptom | Likely cause |
 |---|---|
-| Stack won't start: `denied: not authorized` pulling the image | GHCR package still private. Go back to **One-time: make the GHCR package public**. |
-| `cloudflared` keeps restarting | `TUNNEL_TOKEN` blank, wrong, or rotated. Get a fresh token from the dashboard. |
-| Bot starts but doesn't reply to `/start` on Telegram | Wrong `TELEGRAM_BOT_TOKEN`, or your chat id isn't in `ALLOWED_CHAT_IDS`. |
+| Stack won't start: `denied: not authorized` pulling the image | GHCR package still private. See **One-time: make the GHCR package public**. |
+| `pogo-scout-tailscale` keeps restarting | `TS_AUTHKEY` blank, expired, or already used (non-reusable). Generate a new reusable key from the admin console. |
+| `pogo-scout-tailscale` logs `permission denied: /dev/net/tun` | Host kernel doesn't have the `tun` module loaded. Run `sudo modprobe tun` on the host, or set `TS_USERSPACE=true` in compose.yaml. |
+| `tailscale funnel` returns "funnel not available" | Funnel not enabled for your tailnet. See step 1.2. |
 | Webhook returns 401 | Header `X-Webhook-Secret` missing or doesn't match `.env`. |
-| Webhook returns 502 from Cloudflare | The dashboard ingress points at the wrong service. Must be `http://pogo-scout:8000`. |
-| `Permission denied` writing `/data/pogo_scout.db` in logs | `data/` is owned by host root, not uid 568. Run `sudo chown -R 568:568 /opt/stacks/pogo-scout/data`. |
+| Webhook returns 404 from Tailscale | The funnel rule was never set up, or it points at the wrong path. Re-run the `tailscale funnel` command from step 5 and verify with `tailscale funnel status`. |
+| `/healthz` is reachable publicly | Your funnel was set up without `--set-path=/webhook`. Reset with `tailscale funnel reset` then re-run the command from step 5. |
+| `Permission denied` writing `/data/pogo_scout.db` | `data/` owned by host root, not uid 568. `sudo chown -R 568:568 /opt/stacks/pogo-scout/data`. |
