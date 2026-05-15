@@ -256,7 +256,8 @@ async def _amain():
         await tg_app.start()
         await tg_app.updater.start_polling()
 
-    config = uvicorn.Config(app=app, host="127.0.0.1", port=8000, log_level="info")
+    http_host = os.environ.get("POGO_HTTP_HOST", "127.0.0.1")
+    config = uvicorn.Config(app=app, host=http_host, port=8000, log_level="info")
     server = uvicorn.Server(config)
     try:
         await server.serve()

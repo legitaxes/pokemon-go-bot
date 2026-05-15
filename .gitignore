@@ -19,6 +19,9 @@ venv/
 *.db-shm
 backups/
 
+# Docker / Dockge runtime data
+data/
+
 # IDE
 .vscode/
 .idea/

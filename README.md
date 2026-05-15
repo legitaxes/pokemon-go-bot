@@ -8,7 +8,10 @@ alerts with map images. Runs on a Raspberry Pi behind a Cloudflare Tunnel.
 
 ## Quick start
 
-See [deploy/README.md](deploy/README.md) for the Pi setup walkthrough.
+Two supported deployment paths:
+
+- **Dockge / Docker Compose** — see [deploy/dockge.md](deploy/dockge.md). Bundled `cloudflared` sidecar, bind-mounted `data/` for the SQLite DB. Recommended.
+- **Raspberry Pi (bare metal + systemd)** — see [deploy/README.md](deploy/README.md). Cloudflared installed on the host, the bot runs as a systemd unit.
 
 ## Telegram commands
 

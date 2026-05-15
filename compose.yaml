@@ -1,0 +1,48 @@
+# Dockge stack for pogo-scout. Drop this directory into /opt/stacks/pogo-scout/
+# (or wherever Dockge scans) and Dockge will pick it up.
+#
+# Required side-by-side files:
+#   .env                — secrets (copy from .env.example, fill in)
+#   data/config.yaml    — bot config (copy from config.yaml.example, fill in)
+#
+# The data/ directory is created automatically on first start and persists the
+# SQLite DB. Back it up like any other directory on your host.
+
+services:
+  pogo-scout:
+    build: .
+    container_name: pogo-scout
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    # No 'ports:' on purpose — the bot is only reachable from the cloudflared
+    # sidecar on the internal stack network. /healthz stays internal.
+    networks:
+      - pogo-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: pogo-scout-tunnel
+    restart: unless-stopped
+    # TUNNEL_TOKEN comes from .env. Create the tunnel in the Cloudflare dashboard
+    # (Zero Trust → Networks → Tunnels), copy the token, paste it into .env.
+    # Configure the public hostname + path /webhook → http://pogo-scout:8000
+    # from the same dashboard page.
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      pogo-scout:
+        condition: service_started
+    networks:
+      - pogo-net
+
+networks:
+  pogo-net:
+    driver: bridge
