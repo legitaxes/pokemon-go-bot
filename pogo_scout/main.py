@@ -54,6 +54,7 @@ class Components:
     housekeeping: Housekeeping
     started_at: float
     health_snapshot: Callable[[], dict]
+    tg_app: "Application | None"
 
 
 def build_application(
@@ -74,7 +75,24 @@ def build_application(
         tg_app = build_telegram_app(config.telegram_bot_token)
         if tg_app is not None:
             notifier = TelegramNotifier(tg_app.bot)
-            _register_telegram_handlers(tg_app, conn=conn, config=config)
+
+    started_at = time.monotonic()
+
+    def snapshot() -> dict:
+        last = repo.get_last_webhook_received_at(conn)
+        return {
+            "status": "ok",
+            "version": __version__,
+            "uptime_s": int(time.monotonic() - started_at),
+            "last_webhook_received_at": last.isoformat() if last else None,
+            "last_webhook_age_s": int((_utcnow() - last).total_seconds()) if last else None,
+            "telegram_healthy": getattr(notifier, "healthy", True),
+            "events_active_count": conn.execute("SELECT COUNT(*) FROM events_active").fetchone()[0],
+            "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+        }
+
+    if tg_app is not None:
+        _register_telegram_handlers(tg_app, conn=conn, config=config, snapshot=snapshot)
 
     pipeline = WebhookPipeline(
         conn=conn, config=config,
@@ -92,31 +110,18 @@ def build_application(
         conn=conn, config=config, notifier=notifier, db_path=db_path,
     )
 
-    started_at = time.monotonic()
-
-    def snapshot() -> dict:
-        last = repo.get_last_webhook_received_at(conn)
-        return {
-            "status": "ok",
-            "version": __version__,
-            "uptime_s": int(time.monotonic() - started_at),
-            "last_webhook_received_at": last.isoformat() if last else None,
-            "last_webhook_age_s": int((_utcnow() - last).total_seconds()) if last else None,
-            "telegram_healthy": getattr(notifier, "healthy", True),
-            "events_active_count": conn.execute("SELECT COUNT(*) FROM events_active").fetchone()[0],
-            "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
-        }
-
     app = build_app(secret=config.webhook_secret, pipeline=pipeline, health_snapshot=snapshot)
     components = Components(
         config=config, conn=conn, notifier=notifier, pipeline=pipeline,
         digest=digest, silence=silence, housekeeping=housekeeping,
-        started_at=started_at, health_snapshot=snapshot,
+        started_at=started_at, health_snapshot=snapshot, tg_app=tg_app,
     )
     return app, components
 
 
-def _register_telegram_handlers(tg_app: "Application", *, conn, config: Config) -> None:
+def _register_telegram_handlers(
+    tg_app: "Application", *, conn, config: Config, snapshot: Callable[[], dict],
+) -> None:
     def _gate(handler):
         async def wrapper(update: Update, ctx):
             if update.effective_chat.id not in config.allowed_chat_ids:
@@ -187,9 +192,7 @@ def _register_telegram_handlers(tg_app: "Application", *, conn, config: Config) 
     @_gate
     async def on_status(update, ctx):
         await _reply(update, bcmd.cmd_status(
-            ctx.args, conn=conn,
-            snapshot={"uptime_s": 0, "telegram_healthy": True, "events_active_count": 0},
-            now=_utcnow(),
+            ctx.args, conn=conn, snapshot=snapshot(), now=_utcnow(),
         ))
 
     @_gate
@@ -247,11 +250,21 @@ async def _amain():
     silence_task = asyncio.create_task(components.silence.run_forever(_utcnow))
     hk_task = asyncio.create_task(components.housekeeping.run_forever(_utcnow))
 
+    tg_app = components.tg_app
+    if tg_app is not None:
+        await tg_app.initialize()
+        await tg_app.start()
+        await tg_app.updater.start_polling()
+
     config = uvicorn.Config(app=app, host="127.0.0.1", port=8000, log_level="info")
     server = uvicorn.Server(config)
     try:
         await server.serve()
     finally:
+        if tg_app is not None:
+            await tg_app.updater.stop()
+            await tg_app.stop()
+            await tg_app.shutdown()
         for t in (digest_task, silence_task, hk_task):
             t.cancel()
 

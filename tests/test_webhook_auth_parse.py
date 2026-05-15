@@ -51,8 +51,19 @@ def test_post_webhook_accepts_poracle(client, pipeline, fixtures_dir):
     assert pipeline.events[0].pokemon_id == 246
 
 
-def test_post_webhook_malformed_returns_400(client):
+def test_post_webhook_unknown_schema_returns_200(client, pipeline):
+    # Spec §8.1: unknown schema is 200 (no upstream retry storm). The event isn't processed.
     r = client.post("/webhook", json={"random": "garbage"}, headers={"X-Webhook-Secret": "shh"})
+    assert r.status_code == 200
+    assert pipeline.events == []
+
+
+def test_post_webhook_invalid_json_returns_400(client):
+    r = client.post(
+        "/webhook",
+        content=b"not-json{",
+        headers={"X-Webhook-Secret": "shh", "Content-Type": "application/json"},
+    )
     assert r.status_code == 400
 
 

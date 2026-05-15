@@ -41,7 +41,7 @@ class DigestScheduler:
         rows = repo.query_active(
             self.conn, center=center, radius_m=self.config.radius_m, now=now, kind=None,
         )
-        new_rows = [r for r in rows if r["expires_at"] > since.isoformat()
+        new_rows = [r for r in rows if r["inserted_at"] > since.isoformat()
                     and within_radius(center, (r["lat"], r["lng"]), self.config.radius_m)]
         if not new_rows:
             self._last_run = now

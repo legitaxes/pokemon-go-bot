@@ -138,7 +138,7 @@ def query_active(
     sql = (
         "SELECT event_id, kind, pokemon_or_boss_id, form_id, lat, lng, "
         "iv_percent, cp, level, pvp_great_rank, pvp_ultra_rank, "
-        "raid_level, gym_name, shiny, is_egg, expires_at "
+        "raid_level, gym_name, shiny, is_egg, expires_at, inserted_at "
         "FROM events_active WHERE expires_at > ? "
         "AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?"
     )
@@ -150,7 +150,7 @@ def query_active(
     cols = [
         "event_id", "kind", "pokemon_or_boss_id", "form_id", "lat", "lng",
         "iv_percent", "cp", "level", "pvp_great_rank", "pvp_ultra_rank",
-        "raid_level", "gym_name", "shiny", "is_egg", "expires_at",
+        "raid_level", "gym_name", "shiny", "is_egg", "expires_at", "inserted_at",
     ]
     return [dict(zip(cols, r)) for r in rows]
 

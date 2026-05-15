@@ -68,3 +68,27 @@ async def test_digest_skips_when_no_new_events(db):
     sched = DigestScheduler(conn=db, config=cfg, notifier=notifier, clock=lambda: NOW)
     await sched.tick(NOW)
     notifier.broadcast.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_digest_filters_out_events_older_than_last_run(db):
+    # digest_interval_min=15, so since = NOW - 15min.
+    # Event A was inserted 30 min ago (before last run) -> should be excluded.
+    # Event B was inserted NOW -> should be included.
+    _seed(db, event_id="old",
+          species_name="Bulbasaur", pokemon_id=1,
+          received_at=NOW - timedelta(minutes=30),
+          despawn_at=NOW + timedelta(minutes=5))
+    _seed(db, event_id="fresh",
+          species_name="Larvitar", pokemon_id=246,
+          received_at=NOW,
+          despawn_at=NOW + timedelta(minutes=20))
+    cfg = _cfg()
+    notifier = AsyncMock()
+    notifier.broadcast = AsyncMock(return_value=[7])
+    sched = DigestScheduler(conn=db, config=cfg, notifier=notifier, clock=lambda: NOW)
+    await sched.tick(NOW)
+    notifier.broadcast.assert_awaited_once()
+    text = notifier.broadcast.call_args.kwargs["text"]
+    assert "Larvitar" in text
+    assert "Bulbasaur" not in text
