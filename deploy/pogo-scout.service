@@ -1,0 +1,18 @@
+[Unit]
+Description=Pokemon Go Scout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pokemon-go-bot
+EnvironmentFile=/home/pi/pokemon-go-bot/.env
+Environment=POGO_CONFIG_YAML=/home/pi/pokemon-go-bot/config.yaml
+Environment=POGO_DB_PATH=/home/pi/pokemon-go-bot/pogo_scout.db
+ExecStart=/home/pi/pokemon-go-bot/.venv/bin/python -m pogo_scout.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

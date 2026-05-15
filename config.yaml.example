@@ -1,0 +1,39 @@
+# Boot-time defaults for Pokemon Go Scout.
+# Secrets (token, webhook secret, chat ids) live in .env.
+# Most runtime knobs below can be overridden live from Telegram commands;
+# the DB kv overrides win after boot. See pogo_scout/config.py:reload_from_db.
+
+# --- Required ---
+# Proximity center used when follow mode is off (or the live location is stale).
+# Singapore city hall as a placeholder — change to your home coords.
+home_lat: 1.3521
+home_lng: 103.8198
+
+# --- Optional (defaults shown) ---
+
+# Proximity radius in metres applied to monsters and raids.
+radius_m: 1000
+
+# Minimum IV percent to push (0-100). Shinies bypass this when shiny_alert=true.
+iv_floor: 90.0
+
+# Minimum raid tier (1-5, 6 = mega). Raids below this never alert.
+raid_tier_floor: 5
+
+# Minimum PvP rank (1 = best). Defaults to 5 for both leagues.
+gl_rank_floor: 5
+ul_rank_floor: 5
+
+# After this many minutes without a webhook, fire a one-shot silence alert.
+silence_threshold_min: 45
+
+# 0 = digest disabled. Otherwise post a roll-up every N minutes.
+digest_interval_min: 0
+
+# Static map attached to alerts.
+map_image_enabled: true
+map_zoom: 16
+map_size_px: [600, 400]
+
+# Live-location follow: if a shared live location is older than this, fall back to home coords.
+follow_stale_min: 10
